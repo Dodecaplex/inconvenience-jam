@@ -8,25 +8,28 @@
 #include "libtcod.hpp"
 
 const unsigned ENTITY_MAX = 64;
-const unsigned LEVEL_W = 16;
-const unsigned LEVEL_H = 16;
 
-const unsigned WIN_W = 80;
-const unsigned WIN_H = 60;
+const unsigned WIN_W = 32;
+const unsigned WIN_H = 32;
 
 const unsigned VIEW_W = 24;
 const unsigned VIEW_H = 24;
-const unsigned VIEW_X = 10;
-const unsigned VIEW_Y = 5;
+const unsigned VIEW_X = 4;
+const unsigned VIEW_Y = 4;
 
 enum class TileID {
   NONE = 0,
-  SOLID
+  WALL,
+  LADDER,
+  PILLOW,
+  SPIKE
 };
 
 struct Tile {
   TileID id;
   char flag;
+  
+  bool isSolid(void);
 };
 
 enum class EntityID {
@@ -40,6 +43,11 @@ enum class Step {
 };
 
 struct Entity {
+  Entity(void);
+  Entity(EntityID id, unsigned x=0, unsigned y=0);
+  void update(void);
+  void draw(void);
+
   EntityID id;
   unsigned x;
   unsigned y;
@@ -47,24 +55,32 @@ struct Entity {
   char flag;
   bool active;
 
+};
+
+struct Player : public Entity {
   void update(void);
-  void draw(void);
+
+  char fall;
+  char length;
+
 };
 
 struct Level {
-  Tile tiles[LEVEL_W * LEVEL_H];
+  Tile *tiles;
+  unsigned width;
+  unsigned height;
+  unsigned size;
+
+  Level(unsigned width, unsigned height);
+  Level(const char *fname);
+  ~Level(void);
 
   void draw(void);
+  void set(unsigned x, unsigned y, TileID id);
+  Tile &get(unsigned x, unsigned y);
 };
 
 struct Engine {
-  Engine(void);
-  void init(void);
-
-  void run(void);
-  void update(void);
-  void draw(void);
-
   unsigned long t;
   bool quit;
 
@@ -72,11 +88,17 @@ struct Engine {
   unsigned cam_y;
   TCOD_key_t lastkey;
 
-  Entity player;
+  Player player;
   Entity entities[ENTITY_MAX];
 
   Level *current_level;
 
+  Engine(void);
+  void init(void);
+
+  void run(void);
+  void update(void);
+  void draw(void);
 };
 
 extern Engine ENGINE;
