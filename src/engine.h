@@ -7,15 +7,17 @@
 
 #include "libtcod.hpp"
 
-const unsigned ENTITY_MAX = 64;
-
-const unsigned WIN_W = 32;
+const unsigned WIN_W = 41;
 const unsigned WIN_H = 32;
 
-const unsigned VIEW_W = 24;
+const unsigned ENTITY_MAX = 64;
+
+const unsigned VIEW_W = 33;
 const unsigned VIEW_H = 24;
 const unsigned VIEW_X = 4;
 const unsigned VIEW_Y = 4;
+
+const unsigned char CHAR_WALL = 219; // ASCII solid block
 
 enum class TileID {
   NONE = 0,
@@ -80,7 +82,22 @@ struct Level {
   Tile &get(unsigned x, unsigned y);
 };
 
+enum class EngineState {
+  INTRO = 0,
+  MENU,
+  GAME,
+  QUIT
+};
+
+enum MenuItem { // Non-class enum for casting to unsigned
+  NEW = 0,
+  CONTINUE,
+  QUIT
+};
+
 struct Engine {
+  EngineState state;
+  unsigned menu_selection;
   unsigned long t;
   bool quit;
 
@@ -97,8 +114,21 @@ struct Engine {
   void init(void);
 
   void run(void);
+
   void update(void);
+  void update_intro(void);
+  void update_menu(void);
+  void update_game(void);
+  void update_quit(void);
+
   void draw(void);
+  void draw_intro(void);
+  void draw_menu(void);
+  void draw_game(void);
+  void draw_quit(void);
+
+  bool getKeypress(void);
+  void moveCamera(void);
 };
 
 extern Engine ENGINE;

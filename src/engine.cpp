@@ -4,9 +4,11 @@
  * @author Tony Chiodo (http://dodecaplex.net)
  */
 #include <iostream>
+#include <string>
 #include "engine.h"
 
 Engine ENGINE;
+
 ////////////////////////////////////////////////////////////////////////////////
 // Tile
 bool Tile::isSolid(void) {
@@ -97,7 +99,6 @@ void Player::update(void) {
 
 void Entity::draw(void) {
   if (!active) return;
-
   unsigned i, j;
   for (unsigned ky = 0; true; ++ky) {
     j = y + VIEW_Y - ENGINE.cam_y + ky * ENGINE.current_level->height;
@@ -193,7 +194,7 @@ void Level::draw(void) {
           break;
 
         case TileID::WALL:
-          TCODConsole::root->putChar(i, j, '#');
+          TCODConsole::root->putChar(i, j, CHAR_WALL);
           break;
       }
     }
@@ -219,15 +220,8 @@ Engine::Engine(void) {
 }
 
 void Engine::init(void) {
+  state = EngineState::INTRO;
   player.id = EntityID::PLAYER;
-
-  current_level = new Level(64, 64);
-  for (unsigned j = 0; j < current_level->height; ++j) {
-    for (unsigned i = 0; i < current_level->width; ++i) {
-      // Make a floor for now.
-      current_level->set(i, j, (j==i+1 || j==63)?TileID::WALL:TileID::NONE);
-    }
-  }
 }
 
 void Engine::run(void) {
@@ -241,24 +235,80 @@ void Engine::run(void) {
 }
 
 void Engine::update(void) {
+  switch (state) { // Select update function according to Engine state
+    case EngineState::INTRO: update_intro(); break;
+    case EngineState::MENU:  update_menu(); break;
+    case EngineState::GAME:  update_game(); break;
+    case EngineState::QUIT:  update_quit(); break;
+  }
+}
+
+void Engine::update_intro(void) {
+  if (t++) {
+    TCODSystem::sleepMilli(2000);
+    state = EngineState::MENU;
+    t = 0;
+  }
+}
+
+void Engine::update_menu(void) {
+  // Process input for menu navigation
+  if (!getKeypress()) return;
+  switch (lastkey.vk) {
+    case TCODK_ENTER: // Confirm
+      switch (menu_selection) {
+        case MenuItem::NEW:
+          // TODO: Load first level from file.
+          current_level = new Level(64, 64);
+          for (unsigned j = 0; j < current_level->height; ++j) {
+            for (unsigned i = 0; i < current_level->width; ++i) {
+              current_level->set(i, j,
+                (j==i+1 || j==63)?TileID::WALL:TileID::NONE);
+            }
+          }
+          moveCamera();
+          state = EngineState::GAME;
+          break;
+        case MenuItem::CONTINUE:
+          // TODO: Load saved game. 
+          break;
+        case MenuItem::QUIT:
+          state = EngineState::QUIT;
+          return;
+      }
+      break;
+    case TCODK_UP:
+      if (menu_selection) {
+        --menu_selection;
+      }
+      break;
+    case TCODK_DOWN:
+      if (menu_selection < MenuItem::QUIT) {
+        ++menu_selection;
+      }
+      break;
+    case TCODK_ESCAPE:
+      state = EngineState::QUIT;
+      return;
+    default: break;
+  }
+}
+
+void Engine::update_game(void) {
   // Process input if player is not falling
   if (!player.fall && current_level->get(player.x, player.y + 1).isSolid()) {
-    lastkey = TCODConsole::waitForKeypress(true);
-    if (!lastkey.pressed) return; // Do not update on key release
+    if (!getKeypress()) return;
   }
   else { // Otherwise, pretend no keys were pressed and wait.
     lastkey.pressed = false;
     TCODSystem::sleepMilli(50);
   }
 
-  // std::cerr << t << std::endl;
-
-  // Process input
-  if (lastkey.pressed) {
+  if (lastkey.pressed) { // Process input
     switch (lastkey.vk) {
       default: break;
       case TCODK_ESCAPE:
-        quit = true;
+        state = EngineState::QUIT;
         return;
         break;
       case TCODK_ENTER:
@@ -291,39 +341,99 @@ void Engine::update(void) {
     }
   }
 
-  // Update entities
+  // Update entities and camera
   player.update();
   for (auto &i: entities) { i.update(); }
-
-  // Update camera position
-  /*
-  if (player.x >= cam_x + VIEW_W) {
-    cam_x += VIEW_W;
-  }
-  else if (player.x < cam_x) {
-    cam_x -= VIEW_W;
-  }
-
-  if (player.y >= cam_y + VIEW_H) {
-    cam_y += VIEW_H;
-  }
-  else if (player.y < cam_y) {
-    cam_y -= VIEW_H;
-  }
-  */
-  cam_x = player.x - VIEW_W / 2;
-  cam_y = player.y - VIEW_H / 2;
+  moveCamera();
 
   // Increment time
   ++t;
 }
 
-void Engine::draw(void) {
-  TCODConsole::root->clear();
+void Engine::update_quit(void) {
+  quit = true;
+}
 
+void Engine::draw(void) {
+  switch (state) { // Select draw function according to Engine state
+    case EngineState::INTRO: draw_intro(); break;
+    case EngineState::MENU:  draw_menu(); break;
+    case EngineState::GAME:  draw_game(); break;
+    case EngineState::QUIT:  draw_quit(); break;
+    default: break;
+  }
+
+  TCODConsole::flush();
+}
+
+void Engine::draw_intro(void) {
+  // Draw :: DODECAPLEX :: Logo
+  unsigned i = WIN_W / 2 - 8, j = WIN_H / 2 - 10; // Top left corner
+  TCODConsole::root->setDefaultBackground(TCODColor::red);
+  TCODConsole::root->rect(i + 5, j + 1, 6, 4, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 4, j + 2, 8, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->setDefaultBackground(TCODColor::yellow);
+  TCODConsole::root->rect(i + 5, j + 5, 6, 7, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 4, j + 7, 8, 4, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 6, j + 12, 4, 1, 0, TCOD_BKGND_SET);
+  TCODConsole::root->setDefaultBackground(TCODColor::fuchsia);
+  TCODConsole::root->rect(i + 3, j + 2, 1, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 2, j + 3, 1, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 3, j + 4, 2, 3, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 1, j + 5, 3, 6, 0, TCOD_BKGND_SET);
+  TCODConsole::root->setDefaultBackground(TCODColor::green);
+  TCODConsole::root->rect(i + 12, j + 2, 1, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 13, j + 3, 1, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 11, j + 4, 2, 3, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 12, j + 5, 3, 6, 0, TCOD_BKGND_SET);
+  TCODConsole::root->setDefaultBackground(TCODColor::blue);
+  TCODConsole::root->rect(i + 2, j + 11, 3, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 3, j + 12, 3, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 5, j + 13, 3, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->setDefaultBackground(TCODColor::cyan);
+  TCODConsole::root->rect(i + 11, j + 11, 3, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 10, j + 12, 3, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->rect(i + 8, j + 13, 3, 2, 0, TCOD_BKGND_SET);
+  TCODConsole::root->setDefaultBackground(TCODColor::black);
+  TCODConsole::root->printEx(WIN_W / 2, WIN_H / 2 + 6,
+                             TCOD_BKGND_NONE, TCOD_CENTER,
+                             ":: DODECAPLEX ::\npresents");
+}
+
+void Engine::draw_menu(void) {
+  TCODConsole::root->clear();
+  std::string menustr(":: TITLE ::\n\n"); // TODO: what's this game called?
+  switch (menu_selection) {
+    case MenuItem::NEW:
+      menustr += "> NEW <\n\nCONTINUE\n\nQUIT"; break;
+    case MenuItem::CONTINUE:
+      menustr += "NEW\n\n> CONTINUE <\n\nQUIT"; break;
+    case MenuItem::QUIT:
+      menustr += "NEW\n\nCONTINUE\n\n> QUIT <"; break;
+    default: break;
+  }
+  TCODConsole::root->printEx(WIN_W / 2, 8,
+                             TCOD_BKGND_NONE, TCOD_CENTER,
+                             menustr.c_str());
+}
+
+void Engine::draw_game(void) {
+  TCODConsole::root->printFrame(VIEW_X - 1, VIEW_Y - 1,
+                                VIEW_W + 2, VIEW_H + 2, false);
   current_level->draw();
   player.draw();
   for (auto &i: entities) { i.draw(); }
+}
 
-  TCODConsole::flush();
+void Engine::draw_quit(void) {
+}
+
+bool Engine::getKeypress(void) {
+  lastkey = TCODConsole::waitForKeypress(true);
+  return lastkey.pressed;
+}
+
+void Engine::moveCamera(void) {
+  cam_x = player.x - VIEW_W / 2;
+  cam_y = player.y - VIEW_H / 2;
 }
