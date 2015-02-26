@@ -4,6 +4,7 @@
  * @author Tony Chiodo (http://dodecaplex.net)
  */
 #include <iostream>
+#include <fstream>
 #include <string>
 #include "engine.h"
 
@@ -34,39 +35,42 @@ void Entity::update(void) {
   if (!active) return;
 
   // Update position
+  Tile *tile;
   switch (step) {
     case Step::NONE:
     default: break;
 
     case Step::LEFT:
-      if (!ENGINE.current_level->get(x - 1, y).isSolid()) {
+      tile = &ENGINE.current_level->get(x - 1, y);
+      if (!tile->isSolid()) {
         x = (x - 1) % ENGINE.current_level->width;
       }
-      else if (!ENGINE.current_level->get(x, y - 1).isSolid()) {
-        if (!ENGINE.current_level->get(x - 1, y - 1). isSolid()) {
-          x = (x - 1) % ENGINE.current_level->width;
-          y = (y - 1) % ENGINE.current_level->height;
-        }
+      else if (!ENGINE.current_level->get(x, y - 1).isSolid() &&
+               !ENGINE.current_level->get(x - 1, y - 1). isSolid()) {
+        x = (x - 1) % ENGINE.current_level->width;
+        y = (y - 1) % ENGINE.current_level->height;
       }
       break;
     case Step::RIGHT:
-      if (!ENGINE.current_level->get(x + 1, y).isSolid()) {
+      tile = &ENGINE.current_level->get(x + 1, y);
+      if (!tile->isSolid()) {
         x = (x + 1) % ENGINE.current_level->width;
       }
-      else if (!ENGINE.current_level->get(x, y - 1).isSolid()) {
-        if (!ENGINE.current_level->get(x + 1, y - 1). isSolid()) {
-          x = (x + 1) % ENGINE.current_level->width;
-          y = (y - 1) % ENGINE.current_level->height;
-        }
+      else if (!ENGINE.current_level->get(x, y - 1).isSolid() &&
+               !ENGINE.current_level->get(x + 1, y - 1). isSolid()) {
+        x = (x + 1) % ENGINE.current_level->width;
+        y = (y - 1) % ENGINE.current_level->height;
       }
       break;
     case Step::UP:
-      if (!ENGINE.current_level->get(x, y - 1).isSolid()) {
+      tile = &ENGINE.current_level->get(x, y - 1);
+      if (!tile->isSolid()) {
         y = (y - 1) % ENGINE.current_level->height;
       }
       break;
     case Step::DOWN:
-      if (!ENGINE.current_level->get(x, y + 1).isSolid()) {
+      tile = &ENGINE.current_level->get(x, y + 1);
+      if (!tile->isSolid()) {
         y = (y + 1) % ENGINE.current_level->height;
       }
       break;
@@ -77,7 +81,9 @@ void Entity::update(void) {
 void Player::update(void) {
   // Apply gravity
   Tile &bel = ENGINE.current_level->get(x, y + 1);
-  if (!(bel.isSolid() || bel.id == TileID::LADDER)) {
+  if (!bel.isSolid() && (bel.id != TileID::LADDER ||
+      ENGINE.current_level->get(x, y).id != TileID::LADDER)) {
+    std::cerr << "FALLING! ";
     step = Step::DOWN;
     if (fall != 0xFF) {
       ++fall;
@@ -92,13 +98,23 @@ void Player::update(void) {
   std::cerr << "updating player: ";
   Entity::update();
   std::cerr << "x = " << x << "; y = " << y << ";" << std::endl;
-  if (!(x == prev_x && y == prev_y)) {
-    ENGINE.current_level->set(prev_x, prev_y, TileID::WALL);
+  if (!(x == prev_x && y == prev_y)) { // Spawn a wall tile behind the player
+    //ENGINE.current_level->set(prev_x, prev_y, TileID::WALL);
   }
 }
 
 void Entity::draw(void) {
   if (!active) return;
+  char c;
+  switch (id) {
+    case EntityID::NONE: c = '\0'; return;
+    case EntityID::PLAYER: c = '@'; break;
+    default: c = '?'; break;
+  }
+
+  // Because the camera view wraps around the edges of the level,
+  // it may be necessary to draw entities multiple times, offset
+  // by multiples of the level's width and height.
   unsigned i, j;
   for (unsigned ky = 0; true; ++ky) {
     j = y + VIEW_Y - ENGINE.cam_y + ky * ENGINE.current_level->height;
@@ -107,28 +123,17 @@ void Entity::draw(void) {
     for (unsigned kx = 0; true; ++kx) {
       i = x + VIEW_X - ENGINE.cam_x + kx * ENGINE.current_level->width;
       if (i >= VIEW_X + VIEW_W) break;
+      TCODConsole::root->putChar(i, j, c);
 
-      char c;
-      switch (id) {
-        case EntityID::NONE: c = '\0'; break;
-        case EntityID::PLAYER: c = '@'; break;
-        default: c = '?'; break;
-      }
-
-      if (c != '\0') {
-        TCODConsole::root->putChar(i, j, c);
-      }
-
+      // Draw wrapped columns
       if (kx > 0) {
         i = x + VIEW_X - ENGINE.cam_x - kx * ENGINE.current_level->width;
         if (i >= VIEW_X + VIEW_W) continue;
-
-        if (c != '\0') {
-          TCODConsole::root->putChar(i, j, c);
-        }
+        TCODConsole::root->putChar(i, j, c);
       }
     }
 
+    // Draw wrapped rows
     if (ky > 0) {
       j = y + VIEW_Y - ENGINE.cam_y - ky * ENGINE.current_level->height;
       if (j >= VIEW_Y + VIEW_H) continue;
@@ -137,24 +142,13 @@ void Entity::draw(void) {
         i = x + VIEW_X - ENGINE.cam_x + kx * ENGINE.current_level->width;
         if (i >= VIEW_X + VIEW_W) break;
 
-        char c;
-        switch (id) {
-          case EntityID::NONE: c = '\0'; break;
-          case EntityID::PLAYER: c = '@'; break;
-          default: c = '?'; break;
-        }
+        TCODConsole::root->putChar(i, j, c);
 
-        if (c != '\0') {
-          TCODConsole::root->putChar(i, j, c);
-        }
-
+        // Draw wrapped columns
         if (kx > 0) {
           i = x + VIEW_X - ENGINE.cam_x - kx * ENGINE.current_level->width;
           if (i >= VIEW_X + VIEW_W) continue;
-
-          if (c != '\0') {
-            TCODConsole::root->putChar(i, j, c);
-          }
+          TCODConsole::root->putChar(i, j, c);
         }
       }
     }
@@ -173,6 +167,51 @@ Level::Level(unsigned width, unsigned height) {
   }
 }
 
+Level::Level(const char *fname) {
+  std::ifstream fin(fname);
+  if (fin.good()) {
+    width = 1; height = 1;
+    unsigned w, h;
+    fin >> w >> h;
+    for (unsigned i = 0; i < w; ++i) width *= 2;
+    for (unsigned i = 0; i < h; ++i) height *= 2;
+    size = width * height;
+    tiles = new Tile[size];
+    fin.ignore(256, '\n');
+
+    std::string line;
+    for (unsigned j = 0; j < height; ++j) {
+      std::getline(fin, line);
+      for (unsigned i = 0; i < width; ++i) {
+        TileID id;
+        if (i >= line.length()) {
+          id = TileID::NONE;
+        }
+        else {
+          switch (line[i]) {
+            default:
+            case ' ': id = TileID::NONE; break;
+            case '#': id = TileID::WALL; break;
+            case 'H': id = TileID::LADDER; break;
+            case 'o': id = TileID::PILLOW; break;
+            case 'x': id = TileID::SPIKE; break;
+            case '@':
+              id = TileID::NONE;
+              ENGINE.player.x = i;
+              ENGINE.player.y = j;
+              break;
+          }
+        }
+        tiles[i + width * j].id = id;
+      }
+    }
+  }
+  else {
+    std::cerr << "Error loading level from " << fname << std::endl;
+  }
+
+}
+
 Level::~Level(void) {
   for (unsigned i = 0; i < size; ++i) {
     delete &(tiles[i]);
@@ -183,20 +222,21 @@ Level::~Level(void) {
 void Level::draw(void) {
   unsigned xx, yy;
   for (unsigned j = VIEW_Y; j < VIEW_Y + VIEW_H; ++j) {
-    yy = (j + ENGINE.cam_y - VIEW_Y) % height;
+    yy = (j + ENGINE.cam_y - VIEW_Y);
     for (unsigned i = VIEW_X; i < VIEW_X + VIEW_W; ++i) {
-      xx = (i + ENGINE.cam_x - VIEW_X) % width;
+      xx = (i + ENGINE.cam_x - VIEW_X);
+      char c = '\0';
       Tile &tile = get(xx, yy);
       switch (tile.id) {
-        case TileID::NONE:
-        default:
-          TCODConsole::root->putChar(i, j, ' ');
-          break;
-
-        case TileID::WALL:
-          TCODConsole::root->putChar(i, j, CHAR_WALL);
-          break;
+        case TileID::NONE: c = ' '; break;
+        case TileID::WALL: c = '#'; break;
+        case TileID::LADDER: c = 'H'; break;
+        case TileID::PILLOW: c = 'o'; break;
+        case TileID::SPIKE: c = 'x'; break;
+        default: c = '?';
       }
+      if (c != '\0')
+        TCODConsole::root->putChar(i, j, c);
     }
   }
 }
@@ -259,13 +299,7 @@ void Engine::update_menu(void) {
       switch (menu_selection) {
         case MenuItem::NEW:
           // TODO: Load first level from file.
-          current_level = new Level(64, 64);
-          for (unsigned j = 0; j < current_level->height; ++j) {
-            for (unsigned i = 0; i < current_level->width; ++i) {
-              current_level->set(i, j,
-                (j==i+1 || j==63)?TileID::WALL:TileID::NONE);
-            }
-          }
+          current_level = new Level("level.txt");
           moveCamera();
           state = EngineState::GAME;
           break;
@@ -296,7 +330,9 @@ void Engine::update_menu(void) {
 
 void Engine::update_game(void) {
   // Process input if player is not falling
-  if (!player.fall && current_level->get(player.x, player.y + 1).isSolid()) {
+  if (!player.fall &&
+     (current_level->get(player.x, player.y + 1).isSolid() ||
+      current_level->get(player.x, player.y + 1).id == TileID::LADDER)) {
     if (!getKeypress()) return;
   }
   else { // Otherwise, pretend no keys were pressed and wait.
@@ -305,6 +341,7 @@ void Engine::update_game(void) {
   }
 
   if (lastkey.pressed) { // Process input
+    Tile *tile;
     switch (lastkey.vk) {
       default: break;
       case TCODK_ESCAPE:
@@ -316,22 +353,26 @@ void Engine::update_game(void) {
         break;
 
       case TCODK_LEFT:
-        if (current_level->get(player.x, player.y + 1).isSolid()) {
+        tile = &current_level->get(player.x, player.y + 1);
+        if (tile->isSolid() || tile->id == TileID::LADDER) {
           player.step = Step::LEFT;
         }
         break;
       case TCODK_RIGHT:
-        if (current_level->get(player.x, player.y + 1).isSolid()) {
+        tile = &current_level->get(player.x, player.y + 1);
+        if (tile->isSolid() || tile->id == TileID::LADDER) {
           player.step = Step::RIGHT;
         }
         break;
       case TCODK_UP:
-        if (current_level->get(player.x, player.y).id == TileID::LADDER) {
+        tile = &current_level->get(player.x, player.y);
+        if (tile->id == TileID::LADDER) {
           player.step = Step::UP;
         }
         break;
       case TCODK_DOWN:
-        if (current_level->get(player.x, player.y + 1).id == TileID::LADDER) {
+        tile = &current_level->get(player.x, player.y + 1);
+        if (tile->id == TileID::LADDER) {
           player.step = Step::DOWN;
         }
         break;
