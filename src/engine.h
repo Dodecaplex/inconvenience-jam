@@ -11,6 +11,7 @@ const unsigned WIN_W = 41;
 const unsigned WIN_H = 32;
 
 const unsigned ENTITY_MAX = 64;
+const unsigned LEVEL_MAX = 8;
 
 const unsigned VIEW_W = 33;
 const unsigned VIEW_H = 24;
@@ -22,6 +23,7 @@ const unsigned char CHAR_WALL = 219; // ASCII solid block
 enum class TileID {
   NONE = 0,
   WALL,
+  PLAYER_WALL,
   LADDER,
   PILLOW,
   SPIKE
@@ -36,7 +38,11 @@ struct Tile {
 
 enum class EntityID {
   NONE = 0,
-  PLAYER
+  PLAYER,
+  GEM,
+  EXIT,
+  KEY,
+  LOCK
 };
 
 enum class Step {
@@ -51,20 +57,19 @@ struct Entity {
   void draw(void);
 
   EntityID id;
+  unsigned init_x;
+  unsigned init_y;
   unsigned x;
   unsigned y;
   Step step;
   char flag;
   bool active;
-
 };
 
 struct Player : public Entity {
   void update(void);
 
   char fall;
-  char length;
-
 };
 
 struct Level {
@@ -107,7 +112,12 @@ struct Engine {
 
   Player player;
   Entity entities[ENTITY_MAX];
+  unsigned entity_count;
+  unsigned gems;
+  unsigned keys;
 
+  char levelfname[LEVEL_MAX][16];
+  unsigned level_index;
   Level *current_level;
 
   Engine(void);
@@ -129,6 +139,9 @@ struct Engine {
 
   bool getKeypress(void);
   void moveCamera(void);
+  void save(void);
+  void load(void);
+  void levelReset(void);
 };
 
 extern Engine ENGINE;

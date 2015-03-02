@@ -14,6 +14,7 @@ Engine ENGINE;
 // Tile
 bool Tile::isSolid(void) {
   return id == TileID::WALL ||
+         id == TileID::PLAYER_WALL ||
          id == TileID::PILLOW ||
          id == TileID::SPIKE;
 }
@@ -33,6 +34,44 @@ Entity::Entity(EntityID id, unsigned x, unsigned y) {
 
 void Entity::update(void) {
   if (!active) return;
+
+  // ID-specific behaviors
+  switch (id) {
+    default:
+    case EntityID::NONE: break;
+
+    case EntityID::GEM:
+      if (x == ENGINE.player.x && y == ENGINE.player.y) {
+        --ENGINE.gems;
+        active = false;
+        return;
+      }
+      break;
+    case EntityID::EXIT:
+      flag = ENGINE.gems == 0;
+      if (flag && x == ENGINE.player.x && y == ENGINE.player.y) {
+        ++ENGINE.level_index;
+        ENGINE.levelReset();
+        return;
+      }
+      break;
+    case EntityID::KEY:
+      if (x == ENGINE.player.x && y == ENGINE.player.y) {
+        ++ENGINE.keys;
+        active = false;
+        return;
+      }
+      break;
+    case EntityID::LOCK:
+      if (!flag && ENGINE.keys &&
+          (x == ENGINE.player.x + 1 || x == ENGINE.player.x - 1) &&
+          y == ENGINE.player.y) {
+          flag = 1;
+          ++y;
+          --ENGINE.keys;
+      }
+      break;
+  }
 
   // Update position
   Tile *tile;
@@ -99,17 +138,54 @@ void Player::update(void) {
   Entity::update();
   std::cerr << "x = " << x << "; y = " << y << ";" << std::endl;
   if (!(x == prev_x && y == prev_y)) { // Spawn a wall tile behind the player
-    //ENGINE.current_level->set(prev_x, prev_y, TileID::WALL);
+    Tile &tile = ENGINE.current_level->get(prev_x, prev_y);
+    tile.flag = char(tile.id); // *tosses type-safe enum out the window*
+    tile.id = TileID::PLAYER_WALL; 
   }
 }
 
 void Entity::draw(void) {
   if (!active) return;
   char c;
+  TCODColor fg = TCODColor::white;
+  TCODColor bg = TCODColor::black;
   switch (id) {
-    case EntityID::NONE: c = '\0'; return;
-    case EntityID::PLAYER: c = '@'; break;
-    default: c = '?'; break;
+    case EntityID::NONE: return;
+    case EntityID::PLAYER:
+      c = '@';
+      fg = TCODColor::orange;
+      break;
+    case EntityID::GEM:
+      c = '*';
+      fg = TCODColor::cyan;
+      break;
+    case EntityID::EXIT:
+      c = 'O';
+      if (flag) {
+        fg = TCODColor::green;
+        bg = TCODColor::darkerGreen;
+      }
+      else {
+        fg = TCODColor::darkerGreen;
+      }
+      break;
+    case EntityID::KEY:
+      c = 'k';
+      fg = TCODColor::lightYellow;
+      break;
+    case EntityID::LOCK:
+      c = '#';
+      fg = TCODColor::black;
+      if (flag) {
+        bg = TCODColor::grey;
+      }
+      else {
+        bg = TCODColor::darkestGrey;
+      }
+      break;
+    default:
+      c = '?';
+      break;
   }
 
   // Because the camera view wraps around the edges of the level,
@@ -118,37 +194,37 @@ void Entity::draw(void) {
   unsigned i, j;
   for (unsigned ky = 0; true; ++ky) {
     j = y + VIEW_Y - ENGINE.cam_y + ky * ENGINE.current_level->height;
-    if (j >= VIEW_Y + VIEW_H) break;
+    if (j >= VIEW_Y + VIEW_H || j < VIEW_Y) break;
 
     for (unsigned kx = 0; true; ++kx) {
       i = x + VIEW_X - ENGINE.cam_x + kx * ENGINE.current_level->width;
-      if (i >= VIEW_X + VIEW_W) break;
-      TCODConsole::root->putChar(i, j, c);
+      if (i >= VIEW_X + VIEW_W || i < VIEW_X) break;
+      TCODConsole::root->putCharEx(i, j, c, fg, bg);
 
       // Draw wrapped columns
       if (kx > 0) {
         i = x + VIEW_X - ENGINE.cam_x - kx * ENGINE.current_level->width;
-        if (i >= VIEW_X + VIEW_W) continue;
-        TCODConsole::root->putChar(i, j, c);
+        if (i >= VIEW_X + VIEW_W || i < VIEW_X) continue;
+        TCODConsole::root->putCharEx(i, j, c, fg, bg);
       }
     }
 
     // Draw wrapped rows
     if (ky > 0) {
       j = y + VIEW_Y - ENGINE.cam_y - ky * ENGINE.current_level->height;
-      if (j >= VIEW_Y + VIEW_H) continue;
+      if (j >= VIEW_Y + VIEW_H || j < VIEW_Y) continue;
 
       for (unsigned kx = 0; true; ++kx) {
         i = x + VIEW_X - ENGINE.cam_x + kx * ENGINE.current_level->width;
-        if (i >= VIEW_X + VIEW_W) break;
+        if (i >= VIEW_X + VIEW_W || i < VIEW_X) break;
 
-        TCODConsole::root->putChar(i, j, c);
+        TCODConsole::root->putCharEx(i, j, c, fg, bg);
 
         // Draw wrapped columns
         if (kx > 0) {
           i = x + VIEW_X - ENGINE.cam_x - kx * ENGINE.current_level->width;
-          if (i >= VIEW_X + VIEW_W) continue;
-          TCODConsole::root->putChar(i, j, c);
+          if (i >= VIEW_X + VIEW_W || i < VIEW_X) continue;
+          TCODConsole::root->putCharEx(i, j, c, fg, bg);
         }
       }
     }
@@ -189,22 +265,62 @@ Level::Level(const char *fname) {
         }
         else {
           switch (line[i]) {
+            // Tiles
             default:
             case ' ': id = TileID::NONE; break;
             case '#': id = TileID::WALL; break;
             case 'H': id = TileID::LADDER; break;
             case 'o': id = TileID::PILLOW; break;
             case 'x': id = TileID::SPIKE; break;
+            // Entities
             case '@':
               id = TileID::NONE;
-              ENGINE.player.x = i;
-              ENGINE.player.y = j;
+              ENGINE.player.init_x = i;
+              ENGINE.player.init_y = j;
               break;
+            case '*': {
+              id = TileID::NONE;
+              Entity &ent = ENGINE.entities[ENGINE.entity_count];
+              ent.id = EntityID::GEM;
+              ent.active = true;
+              ent.init_x = i;
+              ent.init_y = j;
+              ++ENGINE.entity_count;
+              ++ENGINE.gems;
+            } break;
+            case 'O': {
+              id = TileID::NONE;
+              Entity &ent = ENGINE.entities[ENGINE.entity_count];
+              ent.id = EntityID::EXIT;
+              ent.active = true;
+              ent.init_x = i;
+              ent.init_y = j;
+              ++ENGINE.entity_count;
+            } break;
+            case 'k': {
+              id = TileID::NONE;
+              Entity &ent = ENGINE.entities[ENGINE.entity_count];
+              ent.id = EntityID::KEY;
+              ent.active = true;
+              ent.init_x = i;
+              ent.init_y = j;
+              ++ENGINE.entity_count;
+            } break;
+            case 'L': {
+              id = TileID::NONE;
+              Entity &ent = ENGINE.entities[ENGINE.entity_count];
+              ent.id = EntityID::LOCK;
+              ent.active = true;
+              ent.init_x = i;
+              ent.init_y = j;
+              ++ENGINE.entity_count;
+            } break;
           }
         }
         tiles[i + width * j].id = id;
       }
     }
+    fin.close();
   }
   else {
     std::cerr << "Error loading level from " << fname << std::endl;
@@ -213,8 +329,8 @@ Level::Level(const char *fname) {
 }
 
 Level::~Level(void) {
-  for (unsigned i = 0; i < size; ++i) {
-    delete &(tiles[i]);
+  for (auto &i: ENGINE.entities) {
+    i.active = false;
   }
   delete [] tiles;
 }
@@ -225,18 +341,37 @@ void Level::draw(void) {
     yy = (j + ENGINE.cam_y - VIEW_Y);
     for (unsigned i = VIEW_X; i < VIEW_X + VIEW_W; ++i) {
       xx = (i + ENGINE.cam_x - VIEW_X);
+
       char c = '\0';
+      TCODColor fg = TCODColor::white;
+      TCODColor bg = TCODColor::black;
+
       Tile &tile = get(xx, yy);
       switch (tile.id) {
         case TileID::NONE: c = ' '; break;
-        case TileID::WALL: c = '#'; break;
-        case TileID::LADDER: c = 'H'; break;
-        case TileID::PILLOW: c = 'o'; break;
-        case TileID::SPIKE: c = 'x'; break;
+        case TileID::WALL:
+          c = '#';
+          break;
+        case TileID::PLAYER_WALL:
+          c = '#';
+          fg = TCODColor::lighterOrange;
+          break;
+        case TileID::LADDER:
+          c = 'H';
+          fg = TCODColor::yellow;
+          break;
+        case TileID::PILLOW:
+          c = 'o';
+          fg = TCODColor::pink;
+          break;
+        case TileID::SPIKE:
+          c = 'x';
+          fg = TCODColor::red;
+          break;
         default: c = '?';
       }
       if (c != '\0')
-        TCODConsole::root->putChar(i, j, c);
+        TCODConsole::root->putCharEx(i, j, c, fg, bg);
     }
   }
 }
@@ -262,6 +397,17 @@ Engine::Engine(void) {
 void Engine::init(void) {
   state = EngineState::INTRO;
   player.id = EntityID::PLAYER;
+  for (unsigned i = 0; i < LEVEL_MAX; ++i) {
+    std::sprintf(levelfname[i], "res/%d.dat", i);
+  }
+  level_index = 0;
+  std::ifstream fin("res/append.dat");
+  if (!fin) {
+    save();
+  }
+  else {
+    fin.close();
+  }
 }
 
 void Engine::run(void) {
@@ -297,14 +443,11 @@ void Engine::update_menu(void) {
   switch (lastkey.vk) {
     case TCODK_ENTER: // Confirm
       switch (menu_selection) {
+        case MenuItem::CONTINUE: // Fall through to NEW
+          load();
         case MenuItem::NEW:
-          // TODO: Load first level from file.
-          current_level = new Level("level.txt");
-          moveCamera();
+          levelReset();
           state = EngineState::GAME;
-          break;
-        case MenuItem::CONTINUE:
-          // TODO: Load saved game. 
           break;
         case MenuItem::QUIT:
           state = EngineState::QUIT;
@@ -379,6 +522,11 @@ void Engine::update_game(void) {
       case TCODK_SPACE:
         player.step = Step::NONE;
         break;
+      case TCODK_CHAR:
+        if(lastkey.c == 'r') {
+          levelReset(); 
+        }
+        break;
     }
   }
 
@@ -443,7 +591,7 @@ void Engine::draw_intro(void) {
 
 void Engine::draw_menu(void) {
   TCODConsole::root->clear();
-  std::string menustr(":: TITLE ::\n\n"); // TODO: what's this game called?
+  std::string menustr(":: APPEND ::\n\n");
   switch (menu_selection) {
     case MenuItem::NEW:
       menustr += "> NEW <\n\nCONTINUE\n\nQUIT"; break;
@@ -462,8 +610,8 @@ void Engine::draw_game(void) {
   TCODConsole::root->printFrame(VIEW_X - 1, VIEW_Y - 1,
                                 VIEW_W + 2, VIEW_H + 2, false);
   current_level->draw();
-  player.draw();
   for (auto &i: entities) { i.draw(); }
+  player.draw();
 }
 
 void Engine::draw_quit(void) {
@@ -477,4 +625,41 @@ bool Engine::getKeypress(void) {
 void Engine::moveCamera(void) {
   cam_x = player.x - VIEW_W / 2;
   cam_y = player.y - VIEW_H / 2;
+}
+
+void Engine::save(void) {
+  std::ofstream fout("res/append.dat");
+  fout << level_index;
+  fout.close();
+}
+
+void Engine::load(void) {
+  std::ifstream fin("res/append.dat");
+  fin >> level_index;
+  fin.close();
+  level_index %= LEVEL_MAX;
+}
+
+void Engine::levelReset(void) {
+  gems = 0;
+  keys = 0;
+  if (current_level != nullptr) delete current_level;
+  current_level = new Level(levelfname[level_index]);
+  player.x = player.init_x;
+  player.y = player.init_y;
+  for (auto &i: entities) {
+    i.x = i.init_x;
+    i.y = i.init_y;
+    i.flag = 0;
+  }
+  for (unsigned j = 0; j < current_level->height; ++j) {
+    for (unsigned i = 0; i < current_level->width; ++i) {
+      Tile &tile = current_level->get(i, j);
+      if (tile.id == TileID::PLAYER_WALL) { // Remove player walls.
+        tile.id = TileID(tile.flag);
+      }
+      tile.flag = 0;
+    }
+  }
+  moveCamera();
 }
